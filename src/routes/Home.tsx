@@ -26,7 +26,7 @@ function Home() {
 
     return (
         <Box>
-            <Button variant="outlined" component="label">
+            {!pdfUrl && <Button variant="outlined" component="label">
                 Click here to upload a file
                 <input
                     type="file"
@@ -34,11 +34,10 @@ function Home() {
                     hidden
                     onChange={handleFileUpload}
                 />
-            </Button>
+            </Button>}
             {pdfUrl && <PDFViewer pdfUrl={pdfUrl} onUpload={onUpload} />}
         </Box>
     );
-
 }
 
 export default Home

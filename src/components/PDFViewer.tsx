@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { Box, IconButton } from '@mui/joy';
+import { Box, IconButton, Typography } from '@mui/joy';
 import { PDFDocumentProxy } from 'pdfjs-dist';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import RotateLeftIcon from '@mui/icons-material/RotateLeft';
 import RotateRightIcon from '@mui/icons-material/RotateRight';
-import { UploadFileOutlined } from '@mui/icons-material';
+import { SaveAltOutlined, UploadFileOutlined } from '@mui/icons-material';
+import Checkbox from '@mui/joy/Checkbox';
+import { degrees, PDFDocument } from 'pdf-lib';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.mjs';
 
@@ -18,11 +20,10 @@ type PDFViewerType = {
 function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
     const [pdf, setPdf] = useState<PDFDocumentProxy>();
     const [pages, setPages] = useState<string[]>([]);
-    const [currentPage, setCurrentPage] = useState(1);
     const [scale, setScale] = useState(1);
-    const [rotation, setRotation] = useState(0);
     const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
-    const renderTaskRef = useRef<any>(null);
+    const [selectedPages, setSelectedPages] = useState<number[]>([]);
+    const [rotations, setRotations] = useState<{ [pageIndex: number]: number }>({});
 
     const scrollToPage = (pageIndex: number) => {
         const canvas = canvasRefs.current[pageIndex];
@@ -37,7 +38,6 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
             const loadedPdf = await loadingTask.promise;
             setPdf(loadedPdf);
 
-            // Generate thumbnails
             const thumbnailPromises = Array.from({ length: loadedPdf.numPages }, async (_, i) => {
                 const page = await loadedPdf.getPage(i + 1);
                 const viewport = page.getViewport({ scale: 0.2 });
@@ -53,7 +53,6 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                 return canvas.toDataURL();
             });
 
-            // Update pages state with the generated thumbnails
             const thumbnails = await Promise.all(thumbnailPromises);
             setPages(thumbnails);
         };
@@ -61,41 +60,153 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
         loadPdf();
     }, [pdfUrl]);
 
+    const togglePageSelection = (pageIndex: number) => {
+        setSelectedPages((prevSelected) => {
+            if (prevSelected.includes(pageIndex)) {
+                // If the page is already selected, remove it
+                return prevSelected.filter((index) => index !== pageIndex);
+            } else {
+                // Otherwise, add it to the selection
+                return [...prevSelected, pageIndex];
+            }
+        });
+    };
+    const renderPage = async (pageNum: number, canvas: HTMLCanvasElement | null, rotationAngle: number, scaleValue: number) => {
+        if (pdf && canvas) {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: scaleValue, rotation: rotationAngle });
+            const context = canvas.getContext('2d');
+
+            // Clear the canvas before rendering
+            context?.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Adjust canvas size based on the scaled viewport
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            if (context) {
+                const renderTask = page.render({ canvasContext: context, viewport });
+                await renderTask.promise;
+            }
+        }
+    };
 
     useEffect(() => {
         const renderAllPages = async () => {
             if (pdf) {
                 for (let i = 0; i < pdf.numPages; i++) {
-                    const page = await pdf.getPage(i + 1);
-                    const viewport = page.getViewport({ scale, rotation });
                     const canvas = canvasRefs.current[i];
-                    if (canvas) {
-                        const context = canvas.getContext('2d');
-                        canvas.width = viewport.width;
-                        canvas.height = viewport.height;
-
-                        // Cancel any ongoing render task for this canvas if it exists
-                        if (renderTaskRef.current) {
-                            renderTaskRef.current.cancel();
-                        }
-
-                        if (context) {
-                            // Start a new render task for each page
-                            renderTaskRef.current = page.render({ canvasContext: context, viewport });
-                            await renderTaskRef.current.promise;
-                        }
-                    }
+                    const rotationAngle = rotations[i] || 0;  // Get individual rotation for each page
+                    renderPage(i + 1, canvas, rotationAngle, scale);  // Use specific rotation for each page
                 }
             }
         };
 
         renderAllPages();
-    }, [pdf, scale, rotation]);
+    }, [pdf, scale, rotations]);  // Include rotations in the dependency array
 
-    const handleZoomIn = () => setScale(prevScale => prevScale + 0.1);
-    const handleZoomOut = () => setScale(prevScale => prevScale > 0.1 ? prevScale - 0.1 : prevScale);
-    const handleRotateRight = () => setRotation(prevRotation => (prevRotation + 90) % 360);
-    const handleRotateLeft = () => setRotation(prevRotation => (prevRotation - 90 + 360) % 360);
+    const handleZoomIn = () => setScale(prevScale => Math.min(prevScale + 0.1, 2)); // Max scale 200%
+    const handleZoomOut = () => setScale(prevScale => Math.max(prevScale - 0.1, 0.1)); // Min scale 10%
+
+    const handleRotateRight = () => {
+        setRotations((prevRotations) => {
+            const newRotations = { ...prevRotations };
+            if (selectedPages.length > 0) {
+                selectedPages.forEach((pageIndex) => {
+                    newRotations[pageIndex] = (newRotations[pageIndex] || 0) + 90;
+                    renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
+                });
+            } else {
+                if (pdf?.numPages) for (let i = 0; i < pdf?.numPages; i++) {
+                    newRotations[i] = (newRotations[i] || 0) + 90;
+                    renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                }
+            }
+            return newRotations;
+        });
+    };
+
+    const handleRotateLeft = () => {
+        setRotations((prevRotations) => {
+            const newRotations = { ...prevRotations };
+            if (selectedPages.length > 0) {
+                selectedPages.forEach((pageIndex) => {
+                    newRotations[pageIndex] = (newRotations[pageIndex] || 0) - 90;
+                    renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
+                });
+            } else {
+                if (pdf?.numPages) for (let i = 0; i < pdf?.numPages; i++) {
+                    newRotations[i] = (newRotations[i] || 0) - 90;
+                    renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                }
+            }
+            return newRotations;
+        });
+    };
+
+
+    useEffect(() => {
+        const handleWheel = (event: WheelEvent) => {
+            if (event.ctrlKey) {
+                event.preventDefault();
+                if (event.deltaY < 0) {
+                    handleZoomIn();
+                } else {
+                    handleZoomOut();
+                }
+            }
+        };
+
+        window.addEventListener("wheel", handleWheel, { passive: false });
+
+        return () => {
+            window.removeEventListener("wheel", handleWheel);
+        };
+    }, []);
+
+    const saveFile = async () => {
+        if (!pdf) return;
+
+        // Create a new PDF document
+        const pdfDoc = await PDFDocument.create();
+
+        // Loop through each canvas (each page) and save its image into the new PDF
+        for (let i = 0; i < pdf.numPages; i++) {
+            const canvas = canvasRefs.current[i];
+            const rotationAngle = rotations[i] || 0;  // Use individual page rotation
+
+            if (canvas) {
+                // Convert canvas to image data
+                const imageDataUrl = canvas.toDataURL("image/png");
+                const img = await pdfDoc.embedPng(imageDataUrl);
+                const { width, height } = img;
+
+                // Create a new page in the PDF document with the adjusted dimensions
+                const newPage = pdfDoc.addPage([width, height]);
+
+                // Set the rotation for the page
+                newPage.setRotation(degrees(rotationAngle));
+
+                // Draw the rotated and scaled image onto the new page
+                newPage.drawImage(img, {
+                    x: 0,
+                    y: 0,
+                    width: width,
+                    height: height,
+                });
+            }
+        }
+
+        // Save the PDF as a Blob
+        const pdfBytes = await pdfDoc.save();
+        const blob = new Blob([pdfBytes], { type: "application/pdf" });
+
+        // Trigger download of the new PDF
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "rotated_and_scaled.pdf";
+        link.click();
+    };
 
     return (
         <Box sx={{ display: 'flex', width: '100%', height: '100vh', bgcolor: 'background.level1' }}>
@@ -103,43 +214,87 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                 {pages.map((thumbnail, index) => (
                     <Box
                         key={index}
-                        component="img"
-                        src={thumbnail}
-                        alt={`Page ${index + 1}`}
-                        sx={{
-                            width: '100%',
-                            cursor: 'pointer',
-                            mb: 2,
-                            border: currentPage === index + 1 ? '2px solid' : '1px solid',
-                            borderColor: currentPage === index + 1 ? 'primary.main' : 'divider',
-                            borderRadius: '4px'
-                        }}
-                        onClick={() => {
-                            setCurrentPage(index + 1);
-                            scrollToPage(index); // Scroll to the selected page
-                        }}
-                    />
+                        sx={{ mb: 2, textAlign: 'center', position: 'relative' }}
+                        onClick={() => scrollToPage(index)} // Directly call scrollToPage without setting currentPage
+                    >
+                        <Box
+                            component="img"
+                            src={thumbnail}
+                            alt={`Page ${index + 1}`}
+                            sx={{
+                                width: '100%',
+                                cursor: 'pointer',
+                                border: selectedPages.includes(index) ? '2px solid' : '1px solid',
+                                borderColor: selectedPages.includes(index) ? 'primary.main' : 'divider',
+                                borderRadius: '4px',
+                            }}
+                        />
+                        <Checkbox size="lg"
+                            checked={selectedPages.includes(index)}
+                            onChange={() => togglePageSelection(index)}
+                        />
+                        <Box component="p" sx={{ mt: 1, fontSize: '12px', color: 'text.secondary' }}>
+                            {index + 1}
+                        </Box>
+                    </Box>
                 ))}
             </Box>
 
             <Box sx={{ flex: 1, overflowY: 'auto', p: 4 }}>
                 {Array.from({ length: pdf?.numPages || 0 }, (_, i) => (
-                    <canvas
+                    <Box
                         key={i}
-                        ref={(el) => {
-                            canvasRefs.current[i] = el;
+                        sx={{
+                            position: 'relative',
+                            mb: 4,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+                            padding: '8px',
+                            backgroundColor: '#fff',
+                            borderRadius: '4px',
                         }}
-                        style={{ marginBottom: '24px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)', padding: '8px', backgroundColor: '#fff', borderRadius: '4px' }}
-                    />
+                    >
+                        <canvas
+                            ref={(el) => {
+                                canvasRefs.current[i] = el;
+                            }}
+                            style={{
+                                borderRadius: '4px'
+                            }}
+                        />
+                        <Box
+                            sx={{
+                                position: 'absolute',
+                                top: '8px',
+                                right: '8px',
+                            }}
+                        >
+                            <Checkbox
+                                checked={selectedPages.includes(i)}
+                                onChange={() => togglePageSelection(i)}
+                                size="lg"
+                            />
+                        </Box>
+                    </Box>
                 ))}
             </Box>
 
 
-            <Box sx={{ position: 'fixed', top: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ position: 'fixed', top: 20, right: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                <IconButton onClick={saveFile}><SaveAltOutlined /></IconButton>
                 <IconButton onClick={handleZoomIn}><ZoomInIcon /></IconButton>
+
+                <Typography sx={{ fontSize: '14px', fontWeight: 'bold' }}>
+                    {Math.round(scale * 100)}%
+                </Typography>
+
                 <IconButton onClick={handleZoomOut}><ZoomOutIcon /></IconButton>
-                <IconButton onClick={handleRotateLeft}><RotateLeftIcon /></IconButton>
+
                 <IconButton onClick={handleRotateRight}><RotateRightIcon /></IconButton>
+                <IconButton onClick={handleRotateLeft}><RotateLeftIcon /></IconButton>
+
                 <IconButton component="label">
                     <UploadFileOutlined />
                     <input
@@ -153,7 +308,6 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                     />
                 </IconButton>
             </Box>
-
         </Box>
     );
 }
