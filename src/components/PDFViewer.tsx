@@ -24,6 +24,7 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
     const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
     const [selectedPages, setSelectedPages] = useState<number[]>([]);
     const [rotations, setRotations] = useState<{ [pageIndex: number]: number }>({});
+    const [originalFile, setOriginalFile] = useState<File | null>(null); // State to store the original file
 
     const scrollToPage = (pageIndex: number) => {
         const canvas = canvasRefs.current[pageIndex];
@@ -38,6 +39,7 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
             const loadedPdf = await loadingTask.promise;
             setPdf(loadedPdf);
 
+            setOriginalFile(new File([pdfUrl], 'uploaded.pdf', { type: 'application/pdf' }));
             const thumbnailPromises = Array.from({ length: loadedPdf.numPages }, async (_, i) => {
                 const page = await loadedPdf.getPage(i + 1);
                 const viewport = page.getViewport({ scale: 0.2 });
@@ -63,24 +65,20 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
     const togglePageSelection = (pageIndex: number) => {
         setSelectedPages((prevSelected) => {
             if (prevSelected.includes(pageIndex)) {
-                // If the page is already selected, remove it
                 return prevSelected.filter((index) => index !== pageIndex);
             } else {
-                // Otherwise, add it to the selection
                 return [...prevSelected, pageIndex];
             }
         });
     };
+
     const renderPage = async (pageNum: number, canvas: HTMLCanvasElement | null, rotationAngle: number, scaleValue: number) => {
         if (pdf && canvas) {
             const page = await pdf.getPage(pageNum);
             const viewport = page.getViewport({ scale: scaleValue, rotation: rotationAngle });
             const context = canvas.getContext('2d');
 
-            // Clear the canvas before rendering
             context?.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Adjust canvas size based on the scaled viewport
             canvas.width = viewport.width;
             canvas.height = viewport.height;
 
@@ -96,17 +94,17 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
             if (pdf) {
                 for (let i = 0; i < pdf.numPages; i++) {
                     const canvas = canvasRefs.current[i];
-                    const rotationAngle = rotations[i] || 0;  // Get individual rotation for each page
-                    renderPage(i + 1, canvas, rotationAngle, scale);  // Use specific rotation for each page
+                    const rotationAngle = rotations[i] || 0;
+                    renderPage(i + 1, canvas, rotationAngle, scale);
                 }
             }
         };
 
         renderAllPages();
-    }, [pdf, scale, rotations]);  // Include rotations in the dependency array
+    }, [pdf, scale, rotations]);
 
-    const handleZoomIn = () => setScale(prevScale => Math.min(prevScale + 0.1, 2)); // Max scale 200%
-    const handleZoomOut = () => setScale(prevScale => Math.max(prevScale - 0.1, 0.1)); // Min scale 10%
+    const handleZoomIn = () => setScale(prevScale => Math.min(prevScale + 0.1, 2));
+    const handleZoomOut = () => setScale(prevScale => Math.max(prevScale - 0.1, 0.1));
 
     const handleRotateRight = () => {
         setRotations((prevRotations) => {
@@ -117,9 +115,11 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                     renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
                 });
             } else {
-                if (pdf?.numPages) for (let i = 0; i < pdf?.numPages; i++) {
-                    newRotations[i] = (newRotations[i] || 0) + 90;
-                    renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                if (pdf?.numPages) {
+                    for (let i = 0; i < pdf?.numPages; i++) {
+                        newRotations[i] = (newRotations[i] || 0) + 90;
+                        renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                    }
                 }
             }
             return newRotations;
@@ -135,73 +135,33 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                     renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
                 });
             } else {
-                if (pdf?.numPages) for (let i = 0; i < pdf?.numPages; i++) {
-                    newRotations[i] = (newRotations[i] || 0) - 90;
-                    renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                if (pdf?.numPages) {
+                    for (let i = 0; i < pdf?.numPages; i++) {
+                        newRotations[i] = (newRotations[i] || 0) - 90;
+                        renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                    }
                 }
             }
             return newRotations;
         });
     };
 
-
-    useEffect(() => {
-        const handleWheel = (event: WheelEvent) => {
-            if (event.ctrlKey) {
-                event.preventDefault();
-                if (event.deltaY < 0) {
-                    handleZoomIn();
-                } else {
-                    handleZoomOut();
-                }
-            }
-        };
-
-        window.addEventListener("wheel", handleWheel, { passive: false });
-
-        return () => {
-            window.removeEventListener("wheel", handleWheel);
-        };
-    }, []);
-
     const saveFile = async () => {
-        if (!pdf) return;
+        if (!pdf || !originalFile) return alert("No PDF loaded!");
 
-        // Create a new PDF document
         const pdfDoc = await PDFDocument.create();
+        const originalBuffer = await originalFile.arrayBuffer();
+        const existingPdfDoc = await PDFDocument.load(originalBuffer);
 
-        // Loop through each canvas (each page) and save its image into the new PDF
-        for (let i = 0; i < pdf.numPages; i++) {
-            const canvas = canvasRefs.current[i];
-            const rotationAngle = rotations[i] || 0;  // Use individual page rotation
-
-            if (canvas) {
-                // Convert canvas to image data
-                const imageDataUrl = canvas.toDataURL("image/png");
-                const img = await pdfDoc.embedPng(imageDataUrl);
-                const { width, height } = img;
-
-                // Create a new page in the PDF document with the adjusted dimensions
-                const newPage = pdfDoc.addPage([width, height]);
-
-                // Set the rotation for the page
-                newPage.setRotation(degrees(rotationAngle));
-
-                // Draw the rotated and scaled image onto the new page
-                newPage.drawImage(img, {
-                    x: 0,
-                    y: 0,
-                    width: width,
-                    height: height,
-                });
-            }
+        for (let i = 0; i < existingPdfDoc.getPageCount(); i++) {
+            const [copiedPage] = await pdfDoc.copyPages(existingPdfDoc, [i]);
+            pdfDoc.addPage(copiedPage);
+            const rotationAngle = rotations[i] || 0;
+            copiedPage.setRotation(degrees(rotationAngle));
         }
 
-        // Save the PDF as a Blob
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: "application/pdf" });
-
-        // Trigger download of the new PDF
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
         link.download = "rotated_and_scaled.pdf";
@@ -215,7 +175,7 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                     <Box
                         key={index}
                         sx={{ mb: 2, textAlign: 'center', position: 'relative' }}
-                        onClick={() => scrollToPage(index)} // Directly call scrollToPage without setting currentPage
+                        onClick={() => scrollToPage(index)}
                     >
                         <Box
                             component="img"
@@ -281,7 +241,6 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                 ))}
             </Box>
 
-
             <Box sx={{ position: 'fixed', top: 20, right: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                 <IconButton onClick={saveFile}><SaveAltOutlined /></IconButton>
                 <IconButton onClick={handleZoomIn}><ZoomInIcon /></IconButton>
@@ -303,7 +262,10 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
                         hidden
                         onChange={(e) => {
                             const file = e.target.files?.[0];
-                            if (file) onUpload(file);
+                            if (file) {
+                                setOriginalFile(file); // Update the original file here
+                                onUpload(file);
+                            }
                         }}
                     />
                 </IconButton>
@@ -311,5 +273,6 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
         </Box>
     );
 }
+
 
 export default PDFViewer;
