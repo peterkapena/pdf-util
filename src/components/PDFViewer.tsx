@@ -72,6 +72,28 @@ function PDFViewer() {
 
     const handleZoomIn = () => setScale(prevScale => Math.min(prevScale + 0.1, 2));
     const handleZoomOut = () => setScale(prevScale => Math.max(prevScale - 0.1, 0.1));
+    const renderThumbnail = async (pageNum: number, rotationAngle: number) => {
+        if (!pdf) return;
+
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 0.2, rotation: rotationAngle });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const context = canvas.getContext('2d');
+
+        if (context) {
+            await page.render({ canvasContext: context, viewport }).promise;
+            const thumbnailDataUrl = canvas.toDataURL();
+
+            // Update the pages state with the new rotated thumbnail
+            setPages((prevPages) => {
+                const updatedPages = [...prevPages];
+                updatedPages[pageNum - 1] = thumbnailDataUrl;
+                return updatedPages;
+            });
+        }
+    };
 
     const handleRotateRight = () => {
         setRotations((prevRotations) => {
@@ -80,12 +102,14 @@ function PDFViewer() {
                 selectedPages.forEach((pageIndex) => {
                     newRotations[pageIndex] = (newRotations[pageIndex] || 0) + 90;
                     renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
+                    renderThumbnail(pageIndex + 1, newRotations[pageIndex]); // Update thumbnail
                 });
             } else {
                 if (pdf?.numPages) {
                     for (let i = 0; i < pdf?.numPages; i++) {
                         newRotations[i] = (newRotations[i] || 0) + 90;
                         renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                        renderThumbnail(i + 1, newRotations[i]); // Update thumbnail
                     }
                 }
             }
@@ -100,12 +124,14 @@ function PDFViewer() {
                 selectedPages.forEach((pageIndex) => {
                     newRotations[pageIndex] = (newRotations[pageIndex] || 0) - 90;
                     renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
+                    renderThumbnail(pageIndex + 1, newRotations[pageIndex]); // Update thumbnail
                 });
             } else {
                 if (pdf?.numPages) {
                     for (let i = 0; i < pdf?.numPages; i++) {
                         newRotations[i] = (newRotations[i] || 0) - 90;
                         renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
+                        renderThumbnail(i + 1, newRotations[i]); // Update thumbnail
                     }
                 }
             }
