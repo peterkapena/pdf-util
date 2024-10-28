@@ -12,12 +12,7 @@ import { degrees, PDFDocument } from 'pdf-lib';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.mjs';
 
-type PDFViewerType = {
-    pdfUrl: string,
-    onUpload: (file: File) => void
-}
-
-function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
+function PDFViewer() {
     const [pdf, setPdf] = useState<PDFDocumentProxy>();
     const [pages, setPages] = useState<string[]>([]);
     const [scale, setScale] = useState(1);
@@ -32,35 +27,6 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
             canvas.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     };
-
-    useEffect(() => {
-        const loadPdf = async () => {
-            const loadingTask = pdfjsLib.getDocument(pdfUrl);
-            const loadedPdf = await loadingTask.promise;
-            setPdf(loadedPdf);
-
-            setOriginalFile(new File([pdfUrl], 'uploaded.pdf', { type: 'application/pdf' }));
-            const thumbnailPromises = Array.from({ length: loadedPdf.numPages }, async (_, i) => {
-                const page = await loadedPdf.getPage(i + 1);
-                const viewport = page.getViewport({ scale: 0.2 });
-                const canvas = document.createElement('canvas');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                const context = canvas.getContext('2d');
-
-                if (context) {
-                    await page.render({ canvasContext: context, viewport }).promise;
-                }
-
-                return canvas.toDataURL();
-            });
-
-            const thumbnails = await Promise.all(thumbnailPromises);
-            setPages(thumbnails);
-        };
-
-        loadPdf();
-    }, [pdfUrl]);
 
     const togglePageSelection = (pageIndex: number) => {
         setSelectedPages((prevSelected) => {
@@ -149,6 +115,7 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
     const saveFile = async () => {
         if (!pdf || !originalFile) return alert("No PDF loaded!");
 
+        // Create a new PDF document
         const pdfDoc = await PDFDocument.create();
         const originalBuffer = await originalFile.arrayBuffer();
         const existingPdfDoc = await PDFDocument.load(originalBuffer);
@@ -156,12 +123,17 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
         for (let i = 0; i < existingPdfDoc.getPageCount(); i++) {
             const [copiedPage] = await pdfDoc.copyPages(existingPdfDoc, [i]);
             pdfDoc.addPage(copiedPage);
+
+            // Set the rotation for each copied page
             const rotationAngle = rotations[i] || 0;
             copiedPage.setRotation(degrees(rotationAngle));
         }
 
+        // Save the PDF as a Blob
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: "application/pdf" });
+
+        // Trigger download of the new PDF
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
         link.download = "rotated_and_scaled.pdf";
@@ -170,104 +142,130 @@ function PDFViewer({ pdfUrl, onUpload }: PDFViewerType) {
 
     return (
         <Box sx={{ display: 'flex', width: '100%', height: '100vh', bgcolor: 'background.level1' }}>
-            <Box sx={{ width: '200px', overflowY: 'auto', p: 2, borderRight: '1px solid #ccc' }}>
-                {pages.map((thumbnail, index) => (
-                    <Box
-                        key={index}
-                        sx={{ mb: 2, textAlign: 'center', position: 'relative' }}
-                        onClick={() => scrollToPage(index)}
-                    >
+            {originalFile && <>
+                <Box sx={{ width: '200px', overflowY: 'auto', p: 2, borderRight: '1px solid #ccc' }}>
+                    {pages.map((thumbnail, index) => (
                         <Box
-                            component="img"
-                            src={thumbnail}
-                            alt={`Page ${index + 1}`}
+                            key={index}
+                            sx={{ mb: 2, textAlign: 'center', position: 'relative' }}
+                            onClick={() => scrollToPage(index)}
+                        >
+                            <Box
+                                component="img"
+                                src={thumbnail}
+                                alt={`Page ${index + 1}`}
+                                sx={{
+                                    width: '100%',
+                                    cursor: 'pointer',
+                                    border: selectedPages.includes(index) ? '2px solid' : '1px solid',
+                                    borderColor: selectedPages.includes(index) ? 'primary.main' : 'divider',
+                                    borderRadius: '4px',
+                                }}
+                            />
+                            <Checkbox size="lg"
+                                checked={selectedPages.includes(index)}
+                                onChange={() => togglePageSelection(index)}
+                            />
+                            <Box component="p" sx={{ mt: 1, fontSize: '12px', color: 'text.secondary' }}>
+                                {index + 1}
+                            </Box>
+                        </Box>
+                    ))}
+                </Box>
+
+                <Box sx={{ flex: 1, overflowY: 'auto', p: 4 }}>
+                    {Array.from({ length: pdf?.numPages || 0 }, (_, i) => (
+                        <Box
+                            key={i}
                             sx={{
-                                width: '100%',
-                                cursor: 'pointer',
-                                border: selectedPages.includes(index) ? '2px solid' : '1px solid',
-                                borderColor: selectedPages.includes(index) ? 'primary.main' : 'divider',
+                                position: 'relative',
+                                mb: 4,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+                                padding: '8px',
+                                backgroundColor: '#fff',
                                 borderRadius: '4px',
                             }}
-                        />
-                        <Checkbox size="lg"
-                            checked={selectedPages.includes(index)}
-                            onChange={() => togglePageSelection(index)}
-                        />
-                        <Box component="p" sx={{ mt: 1, fontSize: '12px', color: 'text.secondary' }}>
-                            {index + 1}
-                        </Box>
-                    </Box>
-                ))}
-            </Box>
-
-            <Box sx={{ flex: 1, overflowY: 'auto', p: 4 }}>
-                {Array.from({ length: pdf?.numPages || 0 }, (_, i) => (
-                    <Box
-                        key={i}
-                        sx={{
-                            position: 'relative',
-                            mb: 4,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-                            padding: '8px',
-                            backgroundColor: '#fff',
-                            borderRadius: '4px',
-                        }}
-                    >
-                        <canvas
-                            ref={(el) => {
-                                canvasRefs.current[i] = el;
-                            }}
-                            style={{
-                                borderRadius: '4px'
-                            }}
-                        />
-                        <Box
-                            sx={{
-                                position: 'absolute',
-                                top: '8px',
-                                right: '8px',
-                            }}
                         >
-                            <Checkbox
-                                checked={selectedPages.includes(i)}
-                                onChange={() => togglePageSelection(i)}
-                                size="lg"
+                            <canvas
+                                ref={(el) => {
+                                    canvasRefs.current[i] = el;
+                                }}
+                                style={{
+                                    borderRadius: '4px'
+                                }}
                             />
+                            <Box
+                                sx={{
+                                    position: 'absolute',
+                                    top: '8px',
+                                    right: '8px',
+                                }}
+                            >
+                                <Checkbox
+                                    checked={selectedPages.includes(i)}
+                                    onChange={() => togglePageSelection(i)}
+                                    size="lg"
+                                />
+                            </Box>
                         </Box>
-                    </Box>
-                ))}
-            </Box>
+                    ))}
+                </Box>
+
+            </>}
 
             <Box sx={{ position: 'fixed', top: 20, right: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <IconButton onClick={saveFile}><SaveAltOutlined /></IconButton>
-                <IconButton onClick={handleZoomIn}><ZoomInIcon /></IconButton>
+                {originalFile &&
 
-                <Typography sx={{ fontSize: '14px', fontWeight: 'bold' }}>
-                    {Math.round(scale * 100)}%
-                </Typography>
+                    <>
+                        <IconButton onClick={saveFile}><SaveAltOutlined /></IconButton>
+                        <IconButton onClick={handleZoomIn}><ZoomInIcon /></IconButton>
 
-                <IconButton onClick={handleZoomOut}><ZoomOutIcon /></IconButton>
+                        <Typography sx={{ fontSize: '14px', fontWeight: 'bold' }}>
+                            {Math.round(scale * 100)}%
+                        </Typography>
 
-                <IconButton onClick={handleRotateRight}><RotateRightIcon /></IconButton>
-                <IconButton onClick={handleRotateLeft}><RotateLeftIcon /></IconButton>
+                        <IconButton onClick={handleZoomOut}><ZoomOutIcon /></IconButton>
 
+                        <IconButton onClick={handleRotateRight}><RotateRightIcon /></IconButton>
+                        <IconButton onClick={handleRotateLeft}><RotateLeftIcon /></IconButton></>
+                }
                 <IconButton component="label">
                     <UploadFileOutlined />
                     <input
                         type="file"
                         accept="application/pdf"
                         hidden
-                        onChange={(e) => {
+                        onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (file) {
                                 setOriginalFile(file); // Update the original file here
-                                onUpload(file);
+
+                                // Load the PDF document after setting the original file
+                                const loadingTask = pdfjsLib.getDocument(URL.createObjectURL(file));
+                                const loadedPdf = await loadingTask.promise;
+                                setPdf(loadedPdf);
+                                // Load the thumbnails
+                                const thumbnailPromises = Array.from({ length: loadedPdf.numPages }, async (_, i) => {
+                                    const page = await loadedPdf.getPage(i + 1);
+                                    const viewport = page.getViewport({ scale: 0.2 });
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = viewport.width;
+                                    canvas.height = viewport.height;
+                                    const context = canvas.getContext('2d');
+                                    if (context) {
+                                        await page.render({ canvasContext: context, viewport }).promise;
+                                    }
+                                    return canvas.toDataURL();
+                                });
+                                const thumbnails = await Promise.all(thumbnailPromises);
+                                setPages(thumbnails);
                             }
                         }}
                     />
+
                 </IconButton>
             </Box>
         </Box>
