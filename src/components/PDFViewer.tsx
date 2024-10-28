@@ -63,7 +63,7 @@ function PDFViewer() {
             fetchAndRenderPdf(id);
         }
     }, [id]);
-    
+
     const fetchAndRenderPdf = async (id: string) => {
         try {
             const response = await axios.get(`http://localhost:3000/download/${id}`, {
@@ -76,7 +76,6 @@ function PDFViewer() {
             const loadedPdf = await loadingTask.promise;
             setPdf(loadedPdf);
 
-            // Generate and set thumbnails for the loaded PDF
             const thumbnailPromises = Array.from({ length: loadedPdf.numPages }, async (_, i) => {
                 const page = await loadedPdf.getPage(i + 1);
                 const viewport = page.getViewport({ scale: 0.2 });
@@ -164,14 +163,14 @@ function PDFViewer() {
                 selectedPages.forEach((pageIndex) => {
                     newRotations[pageIndex] = (newRotations[pageIndex] || 0) - 90;
                     renderPage(pageIndex + 1, canvasRefs.current[pageIndex], newRotations[pageIndex], scale);
-                    renderThumbnail(pageIndex + 1, newRotations[pageIndex]); // Update thumbnail
+                    renderThumbnail(pageIndex + 1, newRotations[pageIndex]);
                 });
             } else {
                 if (pdf?.numPages) {
                     for (let i = 0; i < pdf?.numPages; i++) {
                         newRotations[i] = (newRotations[i] || 0) - 90;
                         renderPage(i + 1, canvasRefs.current[i], newRotations[i], scale);
-                        renderThumbnail(i + 1, newRotations[i]); // Update thumbnail
+                        renderThumbnail(i + 1, newRotations[i]);
                     }
                 }
             }
