@@ -9,6 +9,7 @@ import RotateRightIcon from '@mui/icons-material/RotateRight';
 import { SaveAltOutlined, UploadFileOutlined } from '@mui/icons-material';
 import Checkbox from '@mui/joy/Checkbox';
 import { degrees, PDFDocument } from 'pdf-lib';
+import axios from 'axios';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.mjs';
 
@@ -19,7 +20,7 @@ function PDFViewer() {
     const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
     const [selectedPages, setSelectedPages] = useState<number[]>([]);
     const [rotations, setRotations] = useState<{ [pageIndex: number]: number }>({});
-    const [originalFile, setOriginalFile] = useState<File | null>(null); // State to store the original file
+    const [originalFile, setOriginalFile] = useState<File | null>(null);
 
     const scrollToPage = (pageIndex: number) => {
         const canvas = canvasRefs.current[pageIndex];
@@ -112,6 +113,23 @@ function PDFViewer() {
         });
     };
 
+    const uploadToServer = async (fileBlob: Blob) => {
+        const formData = new FormData();
+        formData.append('pdfFile', fileBlob, 'rotated_and_scaled.pdf');
+
+        try {
+            const response = await axios.post('http://localhost:3000/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+            alert(`File uploaded successfully: ${response.data.filePath}`);
+        } catch (error) {
+            console.error("Error uploading file:", error);
+            alert("Failed to upload the file.");
+        }
+    };
+
     const saveFile = async () => {
         if (!pdf || !originalFile) return alert("No PDF loaded!");
 
@@ -124,20 +142,21 @@ function PDFViewer() {
             const [copiedPage] = await pdfDoc.copyPages(existingPdfDoc, [i]);
             pdfDoc.addPage(copiedPage);
 
-            // Set the rotation for each copied page
             const rotationAngle = rotations[i] || 0;
             copiedPage.setRotation(degrees(rotationAngle));
         }
 
-        // Save the PDF as a Blob
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: "application/pdf" });
 
-        // Trigger download of the new PDF
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "rotated_and_scaled.pdf";
-        link.click();
+        // Call the uploadToServer function to upload the saved file to the server
+        await uploadToServer(blob);
+
+        // // Trigger download for user as well, if needed
+        // const link = document.createElement("a");
+        // link.href = URL.createObjectURL(blob);
+        // link.download = "rotated_and_scaled.pdf";
+        // link.click();
     };
 
     return (
@@ -232,7 +251,7 @@ function PDFViewer() {
                         <IconButton onClick={handleRotateRight}><RotateRightIcon /></IconButton>
                         <IconButton onClick={handleRotateLeft}><RotateLeftIcon /></IconButton></>
                 }
-                <IconButton component="label">
+                <IconButton component="label" color='success' size='lg' variant='outlined'>
                     <UploadFileOutlined />
                     <input
                         type="file"
