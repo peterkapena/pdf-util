@@ -4,7 +4,7 @@ import Home from "../routes/Home";
 
 export const router = createBrowserRouter([
   {
-    path: ROUTES.HOME,
+    path: ROUTES.HOME + ":id?",
     element: <Home />,
   },
 ]);

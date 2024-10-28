@@ -10,6 +10,7 @@ import { SaveAltOutlined, UploadFileOutlined } from '@mui/icons-material';
 import Checkbox from '@mui/joy/Checkbox';
 import { degrees, PDFDocument } from 'pdf-lib';
 import axios from 'axios';
+import { useParams } from 'react-router-dom';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.mjs';
 
@@ -21,6 +22,7 @@ function PDFViewer() {
     const [selectedPages, setSelectedPages] = useState<number[]>([]);
     const [rotations, setRotations] = useState<{ [pageIndex: number]: number }>({});
     const [originalFile, setOriginalFile] = useState<File | null>(null);
+    const { id } = useParams<{ id: string }>();
 
     const scrollToPage = (pageIndex: number) => {
         const canvas = canvasRefs.current[pageIndex];
@@ -53,6 +55,44 @@ function PDFViewer() {
                 const renderTask = page.render({ canvasContext: context, viewport });
                 await renderTask.promise;
             }
+        }
+    };
+
+    useEffect(() => {
+        if (id) {
+            fetchAndRenderPdf(id);
+        }
+    }, [id]);
+    
+    const fetchAndRenderPdf = async (id: string) => {
+        try {
+            const response = await axios.get(`http://localhost:3000/download/${id}`, {
+                responseType: 'blob',
+            });
+            const file = new File([response.data], 'downloaded.pdf', { type: 'application/pdf' });
+
+            setOriginalFile(file);
+            const loadingTask = pdfjsLib.getDocument(URL.createObjectURL(file));
+            const loadedPdf = await loadingTask.promise;
+            setPdf(loadedPdf);
+
+            // Generate and set thumbnails for the loaded PDF
+            const thumbnailPromises = Array.from({ length: loadedPdf.numPages }, async (_, i) => {
+                const page = await loadedPdf.getPage(i + 1);
+                const viewport = page.getViewport({ scale: 0.2 });
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const context = canvas.getContext('2d');
+                if (context) {
+                    await page.render({ canvasContext: context, viewport }).promise;
+                }
+                return canvas.toDataURL();
+            });
+            const thumbnails = await Promise.all(thumbnailPromises);
+            setPages(thumbnails);
+        } catch (error) {
+            console.error("Failed to fetch PDF:", error);
         }
     };
 
