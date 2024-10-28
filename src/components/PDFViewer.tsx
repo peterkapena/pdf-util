@@ -178,12 +178,13 @@ function PDFViewer() {
         });
     };
 
-    const uploadToServer = async (fileBlob: Blob) => {
+    const uploadToServer = async (fileBlob: Blob,) => {
         const formData = new FormData();
         formData.append('pdfFile', fileBlob, 'rotated_and_scaled.pdf');
+        if (id) formData.append('id', id);
 
         try {
-            const response = await axios.post('http://localhost:3000/upload', formData, {
+            const response = await axios.post(`http://localhost:3000/upload?id=${id}`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
@@ -194,6 +195,7 @@ function PDFViewer() {
             alert("Failed to upload the file.");
         }
     };
+
 
     const saveFile = async () => {
         if (!pdf || !originalFile) return alert("No PDF loaded!");
